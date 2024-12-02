@@ -1,0 +1,505 @@
+%% Load Data and Setup
+clear;
+%set seed for reproducible results
+rng('default');
+%create new struct to save variables
+%sessionEntrain = struct();
+%dataTable = table;
+%Load circular stats toolbox 
+circ_stats_toolbox = 'Z:\code\circstat-matlab';
+addpath(genpath(circ_stats_toolbox));
+
+codePath = "Z:\Neuropixels\np_code\";
+rawDataPath = "Z:\Neuropixels\data\rawData\";
+analyzedDataPath = "Z:\Neuropixels\data\AnalyzedData\";
+addpath(genpath(codePath));
+addpath(genpath(rawDataPath));
+addpath(genpath(analyzedDataPath));
+
+dataPath1 = "Z:\Neuropixels\data\rawData\7*";
+dataPath2 = "Z:\Neuropixels\data\rawData\8*";
+
+dataDir = dir(dataPath1);
+dataDir = vertcat(dataDir, dir(dataPath2));
+numMice = numel(dataDir);
+
+%Load Master Table
+load(analyzedDataPath+"masterTable.mat");
+
+%Load input parameters
+load(analyzedDataPath+"parameters.mat"); 
+
+% cellType = "VIP";
+% baseDataPath = "Z:\EvanJiang\"+cellType+"\";
+% dataPath1 = "Z:\EvanJiang\"+cellType+"\7*";
+% dataPath2 = "Z:\EvanJiang\"+cellType+"\8*";
+% dataDir = dir(dataPath1);
+% dataDir = vertcat(dataDir, dir(dataPath2));
+% numMice = numel(dataDir);
+
+% load(['Z:\EvanJiang\PV\Data\' ...
+%     '10-Nov-2024_analysis.mat'],'parameters')
+% if cellType == "PV"
+%     date = "12-Nov-2024_"; %date of PV LFP/CSD files
+% elseif cellType == "SST"
+%     date = "12-Nov-2024_"; %date of SST LFP/CSD files
+% elseif cellType == "VIP"
+%     date = "13-Nov-2024_"; %date of VIP LFP/CSD files
+% end
+
+%Rename input parameters
+numPoissonNeurons = parameters.numPoissonNeurons;
+p_cutoff_entrainment = parameters.p_cutoff_entrainment;
+filterFrequency = parameters.filterFrequency;
+timeStart = parameters.timeStart;
+freq_bands = ["gamma","delta"];
+stimStart = parameters.stimStart;
+nbins = parameters.numBins;
+
+%Firing rate parameters
+gamma_wavelength = parameters.gamma.wavelength;
+delta_wavelength = parameters.delta.wavelength;
+
+%Time windows for the freq bands
+gamma_prestim = parameters.gamma.pre_stim_limits;
+gamma_on = parameters.gamma.on_stim_limits;
+gamma_off = parameters.gamma.off_stim_limits;
+
+delta_prestim = parameters.delta.pre_stim_limits;
+delta_on = parameters.delta.on_stim_limits;
+delta_off = parameters.delta.off_stim_limits;
+
+%%
+tic 
+for mouse = 2:numMice
+currSession = str2double(dataDir(mouse).name); %current session ID
+disp(string(currSession))
+%sessionName = "a"+currSession;
+rawFilePath = rawDataPath+string(currSession)+"\";
+analyzedFilePath = analyzedDataPath+string(currSession)+"\";
+
+[unitsTable,channelsTable,sessionProbesTable,~,~] = getProbeInfo(double(currSession));
+% unitsTable = readtable(filePath+"units.csv");
+% channelsTable = readtable(filePath+"channels.csv");
+% probesTable = readtable(filePath+"probes.csv");
+% sessionProbesTable = probesTable(probesTable.ecephys_session_id==currSession,:); %Table containing probe metadata for this session
+%probeC_id = sessionProbesTable.id(sessionProbesTable.name == "probeC");
+%probeIDs = sessionProbesTable.id;
+%probeNames = sessionProbesTable.name;
+
+
+%Load flash times
+load(rawFilePath+"flash_start_times.mat");
+% load(rawFilePath+"flash_end_times.mat");
+numTrials = length(flash_start_times);
+
+%Load CSDs 
+% CSDfile1 = analyzedFilePath + '\*2024-11*.mat';
+% CSDfile2 = analyzedFilePath + '\*22-Nov-2024*.mat';
+% CSDdir = dir(CSDfile1);
+% CSDdir = vertcat(CSDdir,dir(CSDfile2));
+CSDfile = analyzedFilePath + '\CSD\2024-11-22*.mat';
+CSDdir = dir(CSDfile);
+
+load(analyzedFilePath+'\CSD\'+CSDdir.name,'channelSort','slow_CSDs','fast_CSDs');
+numProbes = numel(fieldnames(channelSort));
+probeNames = fieldnames(channelSort);
+probeIDs = sessionProbesTable.id(cell2mat(cellfun(@(c) ...
+    ismember(c,probeNames),sessionProbesTable.name,'UniformOutput',false)));
+
+load(analyzedFilePath+"cortexUnitsTable")
+preTable = cortexUnitsTable.prestim;
+preTable = preTable(ismember(preTable.probe_name,string(probeNames)),:);
+onTable = cortexUnitsTable.onstim;
+onTable = onTable(ismember(onTable.probe_name,string(probeNames)),:);
+offTable = cortexUnitsTable.offstim;
+offTable = offTable(ismember(preTable.probe_name,string(probeNames)),:);
+
+%Load V1 Channels Table
+%load(filePath+date+currSession+"_V1_Channels.mat");
+
+%Load CSDs 
+%load(filePath+date+string(currSession)+"_V1_CSDs",'fast_V1_CSDs','slow_V1_CSDs'); 
+
+cortex_structures = ["VISp","VISl","VISrl",'VISal',"VISpm","VISam"];
+for probe = 1:numProbes
+    currProbeID = probeIDs(probe);
+    currProbeName = probeNames{probe};
+    disp(currProbeName)
+    probeUnits = string(preTable.probe_name) == currProbeName;
+    structures = strsplit(sessionProbesTable.ecephys_structure_acronyms{...
+        string(sessionProbesTable.name) == currProbeName},"'");
+    currLoc = cell2mat(structures(startsWith(structures,"VIS")));
+    %sessionEntrain.(sessionName).(currProbeName).corticalLocation = currLoc;
+    disp(currLoc)
+    % currLoc = cortex_structures(loc);
+    % 
+    % disp(currLoc)    
+    % currProbeID = sessionProbesTable.id(cell2mat(cellfun(@(c) ...
+    %     ismember(currLoc,strsplit(string(c),"'")),sessionProbesTable.ecephys_structure_acronyms,'UniformOutput',false)));
+    % if isempty(currProbeID)
+    %     disp("No probe in this structure")
+    %     continue
+    % elseif length(currProbeID)>1
+    %     currProbeID
+    % end
+    % currProbeName = sessionProbesTable.name{cell2mat(cellfun(@(c) ...
+    %     ismember(currLoc,strsplit(string(c),"'")),sessionProbesTable.ecephys_structure_acronyms,'UniformOutput',false))};
+    % disp(currProbeName)
+     %units = unitsTable(ismember(unitsTable.probe_id,currProbeID),:);
+     %units = sortrows(units,"probe_vertical_position","descend");
+     %units.unit_id = "a"+units.unit_id;
+     %unitIds = num2cell(string(units.unit_id));
+    % sessionEntrain.(sessionName).(currProbeName).unitsTable = units;
+    % dataTable = vertcat(dataTable,units...
+    %     (:,{'unit_id','peak_channel_id','probe_channel_number','probe_id','probe_description', ...
+    %         'probe_horizontal_position','probe_vertical_position','structure_acronym', ...
+    %         'anterior_posterior_ccf_coordinate','dorsal_ventral_ccf_coordinate', ...
+    %         'left_right_ccf_coordinate'}));
+%Filter out for V1 units
+% V1_Units = unitsTable(ismember(unitsTable.structure_acronym,"VISp"),:);
+% V1_Units = sortrows(V1_Units,"probe_vertical_position","descend");
+% V1_Units.unit_id = "a"+V1_Units.unit_id; 
+% %unitIds = num2cell(string(V1_Units.unit_id));
+% sessionEntrain.(sessionName).V1_Units = V1_Units;
+cortexUnits = unitsTable((unitsTable.probe_id ==currProbeID) & (ismember(unitsTable.structure_acronym,currLoc)),:);
+cortexUnits.unit_id = "a"+cortexUnits.unit_id;
+unitIds = num2cell(string(cortexUnits.unit_id));
+%Load spike times for V1 units
+spikeTimes = load(rawFilePath+"spike_times.mat",unitIds{:});
+%numUnits = length(V1_Units.unit_id);
+numUnits = length(cortexUnits.unit_id);
+
+%Set Initial Variables and Intialize Empty Matrices for Entrainment
+prestim_exp_MIs = NaN(numUnits,1);
+prestim_exp_maxAmp = NaN(numUnits,1);
+prestim_MIs_poisson = NaN(numUnits, numPoissonNeurons); %empty matrix to save MIs for each unit prestim
+prestim_pval_entrain = NaN(numUnits, 1);
+prestim_z_entrain = NaN(numUnits, 1);
+prestim_pref_phase = NaN(numUnits, 1);
+prestim_pref_var = NaN(numUnits, 1);
+
+on_poststim_exp_MIs = NaN(numUnits,1);
+on_poststim_exp_maxAmp = NaN(numUnits,1);
+on_poststim_MIs_poisson = NaN(numUnits, numPoissonNeurons); %empty matrix to save MIs for each unti poststim
+on_poststim_pval_entrain = NaN(numUnits, 1);
+on_poststim_z_entrain = NaN(numUnits, 1);
+on_poststim_pref_phase = NaN(numUnits, 1);
+on_poststim_pref_var = NaN(numUnits, 1);
+
+off_poststim_exp_MIs = NaN(numUnits,1);
+off_poststim_exp_maxAmp = NaN(numUnits,1);
+off_poststim_MIs_poisson = NaN(numUnits, numPoissonNeurons); %empty matrix to save MIs for each unti poststim
+off_poststim_pval_entrain = NaN(numUnits, 1);
+off_poststim_z_entrain = NaN(numUnits, 1);
+off_poststim_pref_phase = NaN(numUnits, 1);
+off_poststim_pref_var = NaN(numUnits, 1);
+
+% Split each unit into trials and Calculate Prestimulus Firing Rate to Filter out Low Firing Rate Units
+trialSpikeTrain = cell(numUnits,numTrials);
+preStim_spikeCount = NaN(numUnits,numTrials); %Doubles as firing rate in Hz since time window is 1s
+for i = 1:numUnits
+    spikes = spikeTimes.(cortexUnits.unit_id(i));
+    for j = 1:numTrials
+        %Grab all the spike times 1s before and after each flash and
+        %convert to ms. 
+        trialSpikeTrain{i,j} = 1000*(spikes(spikes>=flash_start_times(j)-1 & spikes<=flash_start_times(j)+1)-flash_start_times(j));
+        %Find number of spikes 1s before each stimulus
+        preStim_spikeCount(i,j) = length(spikes((spikes>=flash_start_times(j)-1) & (spikes<=flash_start_times(j))));
+    end
+    preTable.spike_times(probeUnits) = mat2cell(trialSpikeTrain,ones(numUnits,1),numTrials);
+    onTable.spike_times(probeUnits) = mat2cell(trialSpikeTrain,ones(numUnits,1),numTrials);
+    offTable.spike_times(probeUnits) = mat2cell(trialSpikeTrain,ones(numUnits,1),numTrials);
+end
+avg_preStim_FiringRate = mean(preStim_spikeCount,2);
+
+%Add trial spike train to struct and create structs to save delta/gamma
+%specfiic variables
+% sessionEntrain.(sessionName).(currProbeName).trialSpikeTrain = trialSpikeTrain;
+% sessionEntrain.(sessionName).(currProbeName).delta = struct();
+% sessionEntrain.(sessionName).(currProbeName).gamma = struct();
+
+for band = 1:length(freq_bands)
+    if freq_bands(band) == "gamma"
+        timeWindow = gamma_wavelength;
+    elseif freq_bands(band) == "delta"
+        timeWindow = delta_wavelength;
+    end
+    % Estimate Firing Rate By Convolving with a square window
+    probFiring = squareFiringRate(trialSpikeTrain,timeWindow,stimStart,nbins);
+    firingRate = 1000*probFiring;
+    if freq_bands(band) == "gamma"
+        preTable.gamma_firingRate(probeUnits) = mat2cell(firingRate,ones(numUnits,1),nbins);
+        onTable.gamma_firingRate(probeUnits) = mat2cell(firingRate,ones(numUnits,1),nbins);
+        offTable.gamma_firingRate(probeUnits) = mat2cell(firingRate,ones(numUnits,1),nbins);
+    elseif freq_bands(band) == "delta"
+        preTable.delta_firingRate(probeUnits) = mat2cell(firingRate,ones(numUnits,1),nbins);
+        onTable.delta_firingRate(probeUnits) = mat2cell(firingRate,ones(numUnits,1),nbins);
+        offTable.delta_firingRate(probeUnits) = mat2cell(firingRate,ones(numUnits,1),nbins);
+    end
+    %Filter out units w/ less than the filter frequency (0.5 Hz)
+    filtered_trialSpikeTrain = trialSpikeTrain;
+    filtered_preStimFiringRate = avg_preStim_FiringRate;
+    filtered_probFiring = probFiring;
+    for unit = 1:numUnits
+        if ~(avg_preStim_FiringRate(unit) > filterFrequency)
+            filtered_trialSpikeTrain(unit,:) = {NaN};
+            filtered_preStimFiringRate(unit) = NaN;
+            filtered_probFiring(unit,:) = NaN;
+        end
+    end
+    preTable.met_firing_frequency(probeUnits) = avg_preStim_FiringRate > filterFrequency;
+    onTable.met_firing_frequency(probeUnits) = avg_preStim_FiringRate > filterFrequency;
+    offTable.met_firing_frequency(probeUnits) = avg_preStim_FiringRate > filterFrequency;
+
+    filtered_units = cortexUnits(avg_preStim_FiringRate > filterFrequency,:);
+    numFiltUnits = nnz(avg_preStim_FiringRate > filterFrequency);        
+    filtered_firingRates = 1000*filtered_probFiring;
+
+% Entrainment Gamma and Delta
+    %Set approrpiate CSD and time window values
+    if freq_bands(band) == "gamma"
+        disp("gamma")
+        oscData = permute(fast_CSDs.(currProbeName),[3,1,2]);
+        pre_stim_limits = gamma_prestim;
+        on_post_stim_limits = gamma_on;
+        off_post_stim_limits = gamma_off;
+    elseif freq_bands(band) == "delta"
+        disp("delta")
+        oscData = permute(slow_CSDs.(currProbeName),[3,1,2]);
+        pre_stim_limits = delta_prestim;
+        on_post_stim_limits = delta_on;
+        off_post_stim_limits = delta_off;
+    else 
+        disp('Error with frequency Bands provided')
+    end
+
+    for unit = 1:numUnits
+        unitID = cortexUnits.unit_id(unit);
+        lfpChannel = getUnitLFPchannel(unitID,cortexUnits,channelsTable,channelSort.(currProbeName));
+        unitChannelIdx = find(lfpChannel == channelSort.(currProbeName).id);
+        preTable.lfp_channel("a"+preTable.unit_id==unitID) = lfpChannel;
+        onTable.lfp_channel("a"+preTable.unit_id==unitID) = lfpChannel;
+        offTable.lfp_channel("a"+preTable.unit_id==unitID) = lfpChannel;
+        if anynan(cell2mat(filtered_trialSpikeTrain(unit,:)))
+            continue
+        end
+        %Find the Closest LFP channel to the current unit
+
+        % unitChannelNum = cortexUnits.probe_channel_number(unit);
+        % unitChannelId = channelsTable.id((unitChannelNum == channelsTable.probe_channel_number) & ...
+        %     (channelsTable.probe_id==currProbeID));
+        % unitChannelIdx = knnsearch((channelSort.(currProbeName).id),unitChannelId);
+        % 
+        %Calculate Phase Bins pre and post stimulus
+        [binLocs_prestim, position_prestim] = phaseBinEJ(oscData(:,unitChannelIdx,:),numTrials,pre_stim_limits); 
+        [binLocs_on_poststim, position_on_poststim] = phaseBinEJ(oscData(:,unitChannelIdx,:),numTrials,on_post_stim_limits);
+        [binLocs_off_poststim, position_off_poststim] = phaseBinEJ(oscData(:,unitChannelIdx,:),numTrials,off_post_stim_limits);
+        
+        %Calculate MI for Units pre and post stimulus
+        [~, prestim_exp_maxAmp(unit,1), prestim_exp_MIs(unit,1)] = spikeIntersect(binLocs_prestim,filtered_trialSpikeTrain(unit,:),position_prestim,false);
+        [~, on_poststim_exp_maxAmp(unit,1),on_poststim_exp_MIs(unit,1)] = spikeIntersect(binLocs_on_poststim,filtered_trialSpikeTrain(unit,:),position_on_poststim,false);
+        [~, off_poststim_exp_maxAmp(unit,1), off_poststim_exp_MIs(unit,1)] = spikeIntersect(binLocs_off_poststim,filtered_trialSpikeTrain(unit,:),position_off_poststim,false);
+        
+        %Generate Poisson Trials
+        poisson_trialSpikeTrain = (poissonTrials_perUnit(filtered_probFiring(unit,:),numTrials,...
+            numPoissonNeurons,stimStart));
+        
+        %Calculate MI for each 
+            parfor neuron = 1:numPoissonNeurons
+                curr_poiss_spikeTrain = poisson_trialSpikeTrain(:,neuron);
+                [~,~,prestim_MIs_poisson(unit,neuron)] = spikeIntersect(binLocs_prestim,curr_poiss_spikeTrain,position_prestim,false);
+                [~,~,off_poststim_MIs_poisson(unit,neuron)] = spikeIntersect(binLocs_off_poststim,curr_poiss_spikeTrain,position_off_poststim,false);
+                [~,~,on_poststim_MIs_poisson(unit,neuron)] = spikeIntersect(binLocs_on_poststim,curr_poiss_spikeTrain,position_on_poststim,false)
+            end
+
+        %Calculate statistics (p values) and correct for multiple comparisons
+        %pull out poisson info for ease of use and log transform to get a
+        %normal distribution
+        log_prestim_poisson_MIs = log10(prestim_MIs_poisson(unit,:));
+        log_off_poststim_poisson_MIs = log10(off_poststim_MIs_poisson(unit,:));
+        log_prestim_exp_MIs = log10(prestim_exp_MIs(unit));
+        log_off_poststim_exp_MIs = log10(off_poststim_exp_MIs(unit));
+        log_on_poststim_poisson_MIs = log10(on_poststim_MIs_poisson(unit,:));
+        log_on_poststim_exp_MIs = log10(on_poststim_exp_MIs(unit));
+        
+        if ~(adtest(log_prestim_poisson_MIs)||adtest(log_off_poststim_poisson_MIs)||...
+                adtest(log_on_poststim_poisson_MIs))
+            %calculate statistics
+            prestim_pval_entrain(unit,1) = normcdf(log_prestim_exp_MIs,...
+                mean(log_prestim_poisson_MIs), std(log_prestim_poisson_MIs), 'upper');
+            off_poststim_pval_entrain(unit,1) = normcdf(log_off_poststim_exp_MIs,...
+                mean(log_off_poststim_poisson_MIs), std(log_off_poststim_poisson_MIs), 'upper');
+            prestim_z_entrain(unit,1) = getZScore(log_prestim_exp_MIs,log_prestim_poisson_MIs);
+            off_poststim_z_entrain(unit,1) = getZScore(log_off_poststim_exp_MIs,log_off_poststim_poisson_MIs);
+            on_poststim_pval_entrain(unit,1) = normcdf(log_on_poststim_exp_MIs, ...
+                 mean(log_on_poststim_poisson_MIs), std(log_on_poststim_poisson_MIs), 'upper');
+            on_poststim_z_entrain(unit,1) = getZScore(log_on_poststim_exp_MIs,log_on_poststim_poisson_MIs);
+        end
+        
+        %Get preferred phase and circular variance
+        phaseOsc = angle(hilbert(squeeze(oscData(:,unitChannelIdx,:))));    
+        [prestim_pref_phase(unit,1),prestim_pref_var(unit,1)] = ...
+            getCircularMeanAndVar(phaseOsc,filtered_trialSpikeTrain(unit,:),pre_stim_limits,1000);
+        [off_poststim_pref_phase(unit,1),off_poststim_pref_var(unit,1)] = ...
+            getCircularMeanAndVar(phaseOsc,filtered_trialSpikeTrain(unit,:),off_post_stim_limits,1000);
+        [on_poststim_pref_phase(unit,1),on_poststim_pref_var(unit,1)] = ...
+            getCircularMeanAndVar(phaseOsc,filtered_trialSpikeTrain(unit,:),on_post_stim_limits,1000);   
+    end
+
+    %determine whether a unit is significantly entrained with bonferroni
+    %correction
+    sig_prestim = (prestim_pval_entrain < p_cutoff_entrainment/numFiltUnits);
+    sig_off_poststim = (off_poststim_pval_entrain < p_cutoff_entrainment/numFiltUnits);
+    sig_on_poststim = (on_poststim_pval_entrain < p_cutoff_entrainment/numFiltUnits);
+    
+    %calculate fraction/number entrained
+    frac_entrained_prestim = (nnz(sig_prestim))/numFiltUnits;
+    frac_entrained_off_poststim = (nnz(sig_off_poststim))/numFiltUnits;
+    frac_entrained_on_poststim = (nnz(sig_on_poststim))/numFiltUnits;
+    
+    numEntrainedUnits_prestim = nnz(sig_prestim);
+    numEntrainedUnits_off_poststim = nnz(sig_off_poststim);
+    numEntrainedUnits_on_poststim = nnz(sig_on_poststim);
+
+    %get unit ids of entrained units
+    % pre_entrainedUnits = units.unit_id(sig_prestim);
+    % pre_idx_entrainedUnits = find(sig_prestim);
+    % off_post_entrainedUnits = units.unit_id(sig_off_poststim);
+    % off_post_idx_entrainedUnits = find(sig_off_poststim);
+    % on_post_entrainedUnits = units.unit_id(sig_on_poststim);
+    % on_post_idx_entrainedUnits = find(sig_on_poststim);
+
+    %Select pref phase and pref var for entrained units only
+    prestim_pref_phase_entrained = prestim_pref_phase(sig_prestim);
+    off_pref_phase_entrained = off_poststim_pref_phase(sig_off_poststim);
+    on_pref_phase_entrained = on_poststim_pref_phase(sig_on_poststim);
+    
+    prestim_pref_var_entrained = prestim_pref_var(sig_prestim);
+    off_pref_var_entrained = off_poststim_pref_var(sig_off_poststim);
+    on_pref_var_entrained = on_poststim_pref_var(sig_on_poststim);
+
+    %Assign Variables to Table
+    if freq_bands(band) == "gamma"
+    preTable.gamma_pval(probeUnits) = prestim_pval_entrain;
+    preTable.gamma_entrained(probeUnits) = sig_prestim;
+    preTable.gamma_MI(probeUnits) = prestim_exp_MIs;
+    preTable.gamma_poissonMIs(probeUnits) = mat2cell(prestim_MIs_poisson,ones(numUnits,1),numPoissonNeurons);
+    preTable.gamma_maxAmp(probeUnits) = prestim_exp_maxAmp;
+    preTable.gamma_Zscore(probeUnits) = prestim_z_entrain;
+    preTable.gamma_pref_phase(probeUnits) = prestim_pref_phase;
+    preTable.gamma_pref_var(probeUnits) = prestim_pref_var;
+
+    onTable.gamma_pval(probeUnits) = on_poststim_pval_entrain;
+    onTable.gamma_entrained(probeUnits) = sig_on_poststim;
+    onTable.gamma_MI(probeUnits) = on_poststim_exp_MIs;
+    onTable.gamma_poissonMIs(probeUnits) = mat2cell(on_poststim_MIs_poisson,ones(numUnits,1),numPoissonNeurons);
+    onTable.gamma_maxAmp(probeUnits) = on_poststim_exp_maxAmp;
+    onTable.gamma_Zscore(probeUnits) = on_poststim_z_entrain;
+    onTable.gamma_pref_phase(probeUnits) = on_poststim_pref_phase;
+    onTable.gamma_pref_var(probeUnits) = on_poststim_pref_var;
+
+    offTable.gamma_pval(probeUnits) = off_poststim_pval_entrain;
+    offTable.gamma_entrained(probeUnits) = sig_off_poststim;
+    offTable.gamma_MI(probeUnits) = off_poststim_exp_MIs;
+    offTable.gamma_poissonMIs(probeUnits) = mat2cell(off_poststim_MIs_poisson,ones(numUnits,1),numPoissonNeurons);
+    offTable.gamma_maxAmp(probeUnits) = off_poststim_exp_maxAmp;
+    offTable.gamma_Zscore(probeUnits) = off_poststim_z_entrain;
+    offTable.gamma_pref_phase(probeUnits) = off_poststim_pref_phase;
+    offTable.gamma_pref_var(probeUnits) = off_poststim_pref_var;
+    
+    elseif freq_bands(band) == "delta"
+    preTable.delta_pval(probeUnits) = prestim_pval_entrain;
+    preTable.delta_entrained(probeUnits) = sig_prestim;
+    preTable.delta_MI(probeUnits) = prestim_exp_MIs;
+    preTable.delta_poissonMIs(probeUnits) = mat2cell(prestim_MIs_poisson,ones(numUnits,1),numPoissonNeurons);
+    preTable.delta_maxAmp(probeUnits) = prestim_exp_maxAmp;
+    preTable.delta_Zscore(probeUnits) = prestim_z_entrain;
+    preTable.delta_pref_phase(probeUnits) = prestim_pref_phase;
+    preTable.delta_pref_var(probeUnits) = prestim_pref_var;
+
+    onTable.delta_pval(probeUnits) = on_poststim_pval_entrain;
+    onTable.delta_entrained(probeUnits) = sig_on_poststim;
+    onTable.delta_MI(probeUnits) = on_poststim_exp_MIs;
+    onTable.delta_poissonMIs(probeUnits) = mat2cell(on_poststim_MIs_poisson,ones(numUnits,1),numPoissonNeurons);
+    onTable.delta_maxAmp(probeUnits) = on_poststim_exp_maxAmp;
+    onTable.delta_Zscore(probeUnits) = on_poststim_z_entrain;
+    onTable.delta_pref_phase(probeUnits) = on_poststim_pref_phase;
+    onTable.delta_pref_var(probeUnits) = on_poststim_pref_var;
+
+    offTable.delta_pval(probeUnits) = off_poststim_pval_entrain;
+    offTable.delta_entrained(probeUnits) = sig_off_poststim;
+    offTable.delta_MI(probeUnits) = off_poststim_exp_MIs;
+    offTable.delta_poissonMIs(probeUnits) = mat2cell(off_poststim_MIs_poisson,ones(numUnits,1),numPoissonNeurons);
+    offTable.delta_maxAmp(probeUnits) = off_poststim_exp_maxAmp;
+    offTable.delta_Zscore(probeUnits) = off_poststim_z_entrain;
+    offTable.delta_pref_phase(probeUnits) = off_poststim_pref_phase;
+    offTable.delta_pref_var(probeUnits) = off_poststim_pref_var;
+
+    end
+
+    % entrain.prestim.entrainment_pVal = prestim_pval_entrain;
+    % entrain.prestim.sigPreStim = sig_prestim;
+    % entrain.prestim.MI = prestim_exp_MIs;  
+    % entrain.prestim.poissonMIs = prestim_MIs_poisson;
+    % entrain.prestim.maxAmp = prestim_exp_maxAmp;
+    % entrain.prestim.Zscores = prestim_z_entrain;
+    % entrain.prestim.prefPhase = prestim_pref_phase_entrained;
+    % entrain.prestim.prefVar = prestim_pref_var_entrained;
+    % entrain.prestim.prefPhaseAll = prestim_pref_phase;
+    % entrain.prestim.prefVarAll = prestim_pref_var;
+    % entrain.prestim.entrainedUnits = pre_entrainedUnits;
+    % entrain.prestim.idxEntrained = pre_idx_entrainedUnits;
+    % entrain.prestim.fracEntrained = frac_entrained_prestim;
+    % entrain.prestim.numEntrainedUnits = numEntrainedUnits_prestim;
+    % entrain.prestim.totalFilteredUnits = numFiltUnits;
+    % 
+    % entrain.off.entrainment_pVal = off_poststim_pval_entrain;
+    % entrain.off.sigOff = sig_off_poststim;
+    % entrain.off.MI = off_poststim_exp_MIs;
+    % entrain.off.poissonMIs = off_poststim_MIs_poisson;
+    % entrain.off.maxAmp = off_poststim_exp_maxAmp;
+    % entrain.off.Zscores = off_poststim_z_entrain;
+    % entrain.off.prefPhase = off_pref_phase_entrained;
+    % entrain.off.prefVar = off_pref_var_entrained;
+    % entrain.off.prefPhaseAll = off_poststim_pref_phase;
+    % entrain.off.prefVarAll = off_poststim_pref_var;
+    % entrain.off.entrainedUnits = off_post_entrainedUnits;
+    % entrain.off.idxEntrained = off_post_idx_entrainedUnits;
+    % entrain.off.fracEntrained = frac_entrained_off_poststim;
+    % entrain.off.numEntrainedUnits = numEntrainedUnits_off_poststim;
+    % entrain.off.totalFilteredUnits = numFiltUnits;
+    % 
+    % entrain.on.entrainment_pVal = on_poststim_pval_entrain;
+    % entrain.on.sigOn = sig_on_poststim;
+    % entrain.on.MI = on_poststim_exp_MIs;
+    % entrain.on.poissonMIs = on_poststim_MIs_poisson;
+    % entrain.on.maxAmp = on_poststim_exp_maxAmp;
+    % entrain.on.Zscores = on_poststim_z_entrain;
+    % entrain.on.prefPhase = on_pref_phase_entrained;
+    % entrain.on.prefVar = on_pref_var_entrained;
+    % entrain.on.prefPhaseAll = on_poststim_pref_phase;
+    % entrain.on.prefVarAll = on_poststim_pref_var;
+    % entrain.on.entrainedUnits = on_post_entrainedUnits;
+    % entrain.on.idxEntrain = on_post_idx_entrainedUnits;
+    % entrain.on.fracEntrained = frac_entrained_on_poststim;
+    % entrain.on.numEntrainedUnits = numEntrainedUnits_on_poststim;
+    % entrain.on.totalFilteredUnits = numFiltUnits;
+
+    %Save entrain struct appropriate freq and session struct
+     % if freq_bands(band) == "delta"
+     %    sessionEntrain.(sessionName).(currProbeName).delta = entrain;
+     %    sessionEntrain.(sessionName).(currProbeName).delta.firingRates = filtered_firingRates;
+     % elseif freq_bands(band) == "gamma"
+     %    sessionEntrain.(sessionName).(currProbeName).gamma = entrain;
+     %    sessionEntrain.(sessionName).(currProbeName).gamma.firingRates = filtered_firingRates;
+     % end
+end
+end
+    cortexUnitsTable.prestim = preTable;
+    cortexUnitsTable.onstim = onTable;
+    cortexUnitsTable.offstim = offTable;
+    save(analyzedFilePath+'cortexUnitsTable.mat','cortexUnitsTable')
+    %save(strcat(analyzedFilePath, string(datetime("now","Format","yyyy-MM-dd")), '_', string(session_num),"cortexUnitsTable2.mat"),'cortexUnitsTable')
+end
+toc
