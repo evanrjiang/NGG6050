@@ -1,0 +1,508 @@
+%% Load Data and Setup
+clear;
+%set seed for reproducible results
+rng('default');
+%create new struct to save variables
+%sessionEntrain = struct();
+%dataTable = table;
+%Load circular stats toolbox 
+circ_stats_toolbox = 'Z:\code\circstat-matlab';
+addpath(genpath(circ_stats_toolbox));
+
+codePath = "Z:\Neuropixels\np_code\";
+rawDataPath = "Z:\Neuropixels\data\rawData\";
+analyzedDataPath = "Z:\Neuropixels\data\AnalyzedData\";
+addpath(genpath(codePath));
+addpath(genpath(rawDataPath));
+addpath(genpath(analyzedDataPath));
+
+dataPath1 = "Z:\Neuropixels\data\rawData\7*";
+dataPath2 = "Z:\Neuropixels\data\rawData\8*";
+
+dataDir = dir(dataPath1);
+dataDir = vertcat(dataDir, dir(dataPath2));
+numMice = numel(dataDir);
+
+%Load Master Table
+load(analyzedDataPath+"masterTable.mat");
+%%
+%All
+close all
+freq_bands = ["gamma","delta"];
+cortex_structures = ["VISp","VISl","VISrl",'VISal',"VISpm","VISam"];
+for loc = 1:length(cortex_structures)
+for band = 1:length(freq_bands)
+    fracEntrained = zeros(numMice,3);
+for i = 1:numMice
+    %currSession = str2double(masterTable.mouse(i)); %current session ID
+    %disp(string(currSession))
+    analyzedMousePath = masterTable.data_path(i);
+    load(analyzedMousePath+'cortexUnitsTable.mat')
+
+    currLoc = cortex_structures(loc);
+    session_structures = string(unique(cortexUnitsTable.prestim.structure_acronym));
+    if ~ismember(currLoc,session_structures)
+        continue;
+    end
+    inCurrLoc = cortexUnitsTable.prestim.structure_acronym == currLoc;
+    metFiring = cortexUnitsTable.prestim.met_firing_frequency;
+
+    preTable = cortexUnitsTable.prestim(inCurrLoc&metFiring,:);
+    onTable = cortexUnitsTable.onstim(inCurrLoc&metFiring,:);
+    offTable = cortexUnitsTable.offstim(inCurrLoc&metFiring,:);
+    numUnits = size(preTable,1);
+
+    if freq_bands(band) == "gamma"
+        preGamma = preTable.gamma_entrained;
+        onGamma = onTable.gamma_entrained;
+        offGamma = offTable.gamma_entrained;        
+        fracEntrained(i,:) = [nnz(preGamma)/numUnits,...
+                        nnz(onGamma)/numUnits,...
+                        nnz(offGamma)/numUnits];
+    elseif freq_bands(band) == "delta"
+        preDelta = preTable.delta_entrained;
+        onDelta = onTable.delta_entrained;
+        offDelta = offTable.delta_entrained;
+        fracEntrained(i,:) = [nnz(preDelta)/numUnits,...
+                        nnz(onDelta)/numUnits,...
+                        nnz(offDelta)/numUnits];        
+    end
+end
+entrain = figure;
+x = categorical(masterTable.mouse);
+bar(x,fracEntrained)
+hold on
+ylabel('Fraction of Entrained Units')
+xlabel('Mouse Number')
+ax = gca;
+ax.YAxis.FontSize = 14;
+legend('Pre Stim','StimOn','StimOff','FontSize',20)
+%legend('Pre Stim','Post Stim','FontSize',20)
+if freq_bands(band) == "gamma"
+    title('Gamma, '+currLoc)
+elseif freq_bands(band) == "delta"
+    title('Delta, '+currLoc)    
+end
+ % savefig(entrain,strcat(analyzedDataPath,'summaryFigures\Entrainment\',string(datetime("now","Format","yyyy-MM-dd")),...
+ %     '_',currLoc,'_',freq_bands(band),'_entrainment'))
+end
+end
+
+%% Cre + 
+close all
+cellTypes = ["Pv","Sst","Vip"];
+freq_bands = ["gamma","delta"];
+cortex_structures = ["VISp","VISl","VISrl",'VISal',"VISpm","VISam"];
+for type = 1:length(cellTypes)
+    creTable = masterTable(masterTable.genotype == cellTypes(type),:);
+    creMice = size(creTable,1);
+for loc = 1:length(cortex_structures)
+for band = 1:length(freq_bands)
+    fracEntrained = zeros(creMice,3);
+for i = 1:creMice
+    %currSession = str2double(creTable.mouse(i)); %current session ID
+    %disp(string(currSession))
+    analyzedMousePath = creTable.data_path(i);
+    load(analyzedMousePath+'cortexUnitsTable.mat')
+
+    currLoc = cortex_structures(loc);
+    session_structures = string(unique(cortexUnitsTable.prestim.structure_acronym));
+    if ~ismember(currLoc,session_structures)
+        continue;
+    end
+    inCurrLoc = cortexUnitsTable.prestim.structure_acronym == currLoc;
+    crePos = cortexUnitsTable.prestim.cre;
+    metFiring = cortexUnitsTable.prestim.met_firing_frequency;
+    
+    preTable = cortexUnitsTable.prestim(inCurrLoc&crePos&metFiring,:);
+    onTable = cortexUnitsTable.onstim(inCurrLoc&crePos&metFiring,:);
+    offTable = cortexUnitsTable.offstim(inCurrLoc&crePos&metFiring,:);
+    numUnits = size(preTable,1);
+
+    if freq_bands(band) == "gamma"
+        preGamma = preTable.gamma_entrained;
+        onGamma = onTable.gamma_entrained;
+        offGamma = offTable.gamma_entrained;
+        fracEntrained(i,:) = [nnz(preGamma)/numUnits,...
+                        nnz(onGamma)/numUnits,...
+                        nnz(offGamma)/numUnits];
+    elseif freq_bands(band) == "delta"
+        preDelta = preTable.delta_entrained;
+        onDelta = onTable.delta_entrained;
+        offDelta = offTable.delta_entrained;
+        fracEntrained(i,:) = [nnz(preDelta)/numUnits,...
+                        nnz(onDelta)/numUnits,...
+                        nnz(offDelta)/numUnits];        
+    end
+end
+entrain = figure;
+x = categorical(creTable.mouse);
+bar(x,fracEntrained)
+hold on
+ylabel('Fraction of Entrained Units')
+legend('Pre Stim','StimOn','StimOff')
+if freq_bands(band) == "gamma"
+    title('Gamma '+cellTypes(type)+' '+currLoc)
+elseif freq_bands(band) == "delta"
+    title('Delta '+cellTypes(type)+' '+currLoc) 
+end
+savefig(entrain,strcat(analyzedDataPath,'summaryFigures\Entrainment\',...
+    string(datetime("now","Format","yyyy-MM-dd")),'_',cellTypes(type),'_',currLoc,'_',freq_bands(band),'_entrainment'))
+end
+end
+end
+
+%% Phase Preferences pre stim and post stim
+close all
+
+cellTypes = ["Pv","Sst","Vip"];
+cortex_structures = ["VISp","VISl","VISrl",'VISal',"VISpm","VISam"];
+
+for type = 1:length(cellTypes)
+    creTable = masterTable(masterTable.genotype == cellTypes(type),:);
+    creMice = size(creTable,1);
+    cellType = cellTypes(type);
+for loc = 1:length(cortex_structures)
+    pooledCre_pre = [];
+    pooledCre_on = [];
+    pooledCre_off = [];
+  
+    pooledNonCre_pre = [];
+    pooledNonCre_on = [];
+    pooledNonCre_off = [];
+
+for mouse = 1:creMice
+    %currSession = str2double(creTable.mouse(mouse)); %current session ID
+    %disp(string(currSession))
+    analyzedMousePath = creTable.data_path(mouse);
+    load(analyzedMousePath+'cortexUnitsTable.mat')
+
+    currLoc = cortex_structures(loc);
+    session_structures = string(unique(cortexUnitsTable.prestim.structure_acronym));
+    if ~ismember(currLoc,session_structures)
+        continue;
+    end
+    inCurrLoc = cortexUnitsTable.prestim.structure_acronym == currLoc;
+    crePos = cortexUnitsTable.prestim.cre;
+    metFiring = cortexUnitsTable.prestim.met_firing_frequency;
+  
+    cre_pre = cortexUnitsTable.prestim.delta_pref_phase(inCurrLoc&crePos&metFiring&...
+        cortexUnitsTable.prestim.delta_entrained);
+    cre_on = cortexUnitsTable.onstim.delta_pref_phase(inCurrLoc&crePos&metFiring&...
+        cortexUnitsTable.onstim.delta_entrained);
+    cre_off = cortexUnitsTable.offstim.delta_pref_phase(inCurrLoc&crePos&metFiring&...
+        cortexUnitsTable.offstim.delta_entrained);
+    
+    pooledCre_pre = [pooledCre_pre;cre_pre];
+    pooledCre_on = [pooledCre_on;cre_on];
+    pooledCre_off = [pooledCre_off;cre_off];
+
+    notCre_pre = cortexUnitsTable.prestim.delta_pref_phase(inCurrLoc&(~crePos)&metFiring&...
+        cortexUnitsTable.prestim.delta_entrained);
+    notCre_on = cortexUnitsTable.onstim.delta_pref_phase(inCurrLoc&(~crePos)&metFiring&...
+        cortexUnitsTable.onstim.delta_entrained);
+    notCre_off = cortexUnitsTable.offstim.delta_pref_phase(inCurrLoc&(~crePos)&metFiring&...
+        cortexUnitsTable.offstim.delta_entrained);
+
+    pooledNonCre_pre = [pooledNonCre_pre;notCre_pre];
+    pooledNonCre_on = [pooledNonCre_on;notCre_on];
+    pooledNonCre_off = [pooledNonCre_off;notCre_off];
+
+end
+    all_pre = [pooledCre_pre;pooledNonCre_pre];
+    all_on = [pooledCre_on;pooledNonCre_on];
+    all_off = [pooledCre_off;pooledNonCre_off];
+%Delta Rose plots
+rosePlot = figure;
+t = tiledlayout(2,3,'TileSpacing','tight');
+title(t,cellType+' Pooled Units ('+creMice+' mice),'+currLoc,'FontSize',24)
+nexttile
+polarhistogram(all_pre,20,'Normalization','probability')
+title({"All PreStim", "N = "+length(all_pre)+" units"},'FontSize',18)
+ax = gca;
+ax.ThetaAxis.FontSize = 14;
+ax.RAxis.FontSize = 14;
+nexttile
+polarhistogram(pooledCre_pre,20,'Normalization','probability','FaceColor','r')
+title({cellType+" PreStim","N = "+length(pooledCre_pre)+" units"},'FontSize',18)
+ax = gca;
+ax.ThetaAxis.FontSize = 14;
+ax.RAxis.FontSize = 14;
+nexttile
+polarhistogram(pooledNonCre_pre,20,'Normalization','probability','FaceColor','g')
+title({"non-"+cellType+" PreStim","N = "+length(pooledNonCre_pre)+" units"},'FontSize',18)
+ax = gca;
+ax.ThetaAxis.FontSize = 14;
+ax.RAxis.FontSize = 14;
+nexttile
+polarhistogram(all_on,20,'Normalization','probability')
+title({"All PostStim","N = "+length(all_on)+" units"},'FontSize',18)
+ax = gca;
+ax.ThetaAxis.FontSize = 14;
+ax.RAxis.FontSize = 14;
+nexttile
+polarhistogram(pooledCre_on,20,'Normalization','probability','FaceColor','r')
+title({cellType+" PostStim","N = "+length(pooledCre_on)+" units"},'FontSize',18)
+ax = gca;
+ax.ThetaAxis.FontSize = 14;
+ax.RAxis.FontSize = 14;
+nexttile
+polarhistogram(pooledNonCre_on,20,'Normalization','probability','FaceColor','g')
+title({"non-"+cellType+" PostStim","N = "+length(pooledNonCre_on)+" units"},'FontSize',18)
+ax = gca;
+ax.ThetaAxis.FontSize = 14;
+ax.RAxis.FontSize = 14;
+
+% rosePlot = figure;
+% t = tiledlayout(3,3,'TileSpacing','tight');
+% title(t,cellType+' Pooled Units, '+currLoc)
+% nexttile
+% polarhistogram(all_pre,20,'Normalization','probability')
+% title({"All PreStim",creMice+" mice, "+"N = "+length(all_pre)+" units"})
+% 
+% nexttile
+% polarhistogram(all_on,20,'Normalization','probability')
+% title({"All OnStim",creMice+" mice, "+"N = "+length(all_on)+" units"})
+% 
+% nexttile
+% polarhistogram(all_off, 20, 'Normalization','probability')
+% title({"All OffStim",creMice+" mice, "+"N = "+length(all_off)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledCre_pre,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" PreStim",creMice+" mice, "+"N = "+length(pooledCre_pre)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledCre_on,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" OnStim",creMice+" mice, "+"N = "+length(pooledCre_on)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledCre_off,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" OffStim",creMice+" mice, "+"N = "+length(pooledCre_off)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledNonCre_pre,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" PreStim",creMice+" mice, "+"N = "+length(pooledNonCre_pre)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledNonCre_on,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" OnStim",creMice+" mice, "+"N = "+length(pooledNonCre_on)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledNonCre_off,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" OffStim",creMice+" mice, "+"N = "+length(pooledNonCre_off)+" units"})
+
+% savefig(rosePlot,strcat(analyzedDataPath,'summaryFigures\PhasePreference\',...
+%     string(datetime("now","Format","yyyy-MM-dd")),'_',cellType,'_',currLoc,'_phase_preference'))
+end
+end
+%% Rose Plot of Stimulus Entrained Units pref phase and their corresponding prestim phase
+close all
+cellTypes = ["Pv","Sst","Vip"];
+cortex_structures = ["VISp","VISl","VISrl",'VISal',"VISpm","VISam"];
+for type = 1:length(cellTypes)
+    creTable = masterTable(masterTable.genotype == cellTypes(type),:);
+    creMice = size(creTable,1);
+    cellType = cellTypes(type);
+for loc = 1:length(cortex_structures)
+    pooledCreOn_pre = [];
+    pooledCreOn = [];    
+    pooledCreOff_pre = [];
+    pooledCreOff = [];
+  
+    pooledNotCreOn_pre = [];
+    pooledNotCreOn = [];
+    pooledNotCreOff_pre = [];
+    pooledNotCreOff = [];
+for i = 1:creMice
+    %currSession = str2double(creTable.mouse(i)); %current session ID
+    %disp(string(currSession))
+    analyzedMousePath = creTable.data_path(i);
+    load(analyzedMousePath+'cortexUnitsTable.mat')
+
+    currLoc = cortex_structures(loc);
+    session_structures = string(unique(cortexUnitsTable.prestim.structure_acronym));
+    if ~ismember(currLoc,session_structures)
+        continue;
+    end
+    inCurrLoc = cortexUnitsTable.prestim.structure_acronym == currLoc;
+    crePos = cortexUnitsTable.prestim.cre;
+    metFiring = cortexUnitsTable.prestim.met_firing_frequency;
+
+    cre_pre = cortexUnitsTable.prestim(inCurrLoc&crePos&metFiring,:);
+    cre_on = cortexUnitsTable.onstim(inCurrLoc&crePos&metFiring,:);
+    cre_off = cortexUnitsTable.offstim(inCurrLoc&crePos&metFiring,:);
+
+    onIdx = find(cre_on.delta_entrained);
+    offIdx = find(cre_off.delta_entrained);
+    
+    crePreOn = cre_pre.delta_pref_phase(onIdx);
+    creOn = cre_on.delta_pref_phase(onIdx);
+    crePreOff = cre_pre.delta_pref_phase(offIdx);
+    creOff = cre_off.delta_pref_phase(offIdx);
+    
+    pooledCreOn_pre = [pooledCreOn_pre;crePreOn];
+    pooledCreOn = [pooledCreOn;creOn];
+    pooledCreOff_pre = [pooledCreOff_pre;crePreOff];
+    pooledCreOff = [pooledCreOff;creOff];
+
+    notCre_pre = cortexUnitsTable.prestim(inCurrLoc&(~crePos)&metFiring,:);
+    notCre_on = cortexUnitsTable.onstim(inCurrLoc&(~crePos)&metFiring,:);
+    notCre_off = cortexUnitsTable.offstim(inCurrLoc&(~crePos)&metFiring,:);
+    
+    onIdx = find(notCre_on.delta_entrained);
+    offIdx = find(notCre_off.delta_entrained);
+    
+    notCrePreOn = notCre_pre.delta_pref_phase(onIdx);
+    notCreOn = notCre_on.delta_pref_phase(onIdx);
+    notCrePreOff = notCre_pre.delta_pref_phase(offIdx);
+    notCreOff = notCre_off.delta_pref_phase(offIdx);
+    
+    pooledNotCreOn_pre = [pooledNotCreOn_pre;notCrePreOn];
+    pooledNotCreOn = [pooledNotCreOn;notCreOn];
+    pooledNotCreOff_pre = [pooledNotCreOff_pre;notCrePreOff];
+    pooledNotCreOff = [pooledNotCreOff;notCreOff];
+
+end
+allOn_pre = [pooledCreOn_pre;pooledNotCreOn_pre];
+allOn = [pooledCreOn;pooledNotCreOn];
+allOff_pre = [pooledCreOff_pre;pooledNotCreOff_pre];
+allOff = [pooledCreOff;pooledNotCreOff];
+
+rosePlot = figure;
+t = tiledlayout(3,4);
+title(t,cellType+' Pooled Units ('+creMice+' mice),'+currLoc,'FontSize',24)
+%All units
+nexttile
+polarhistogram(allOn_pre,20,'Normalization','probability')
+title({"Pre OnStim",creMice+" mice, "+"N = "+length(allOn_pre)+" units"})
+
+nexttile
+polarhistogram(allOn,20,'Normalization','probability')
+title({"Post OnStim",creMice+" mice, "+"N = "+length(allOn)+" units"})
+
+nexttile
+polarhistogram(allOff_pre, 20, 'Normalization','probability')
+title({"Pre OffStim",creMice+" mice, "+"N = "+length(allOff_pre)+" units"})
+
+nexttile
+polarhistogram(allOff,20,'Normalization','probability')
+title({"Post OffStim",creMice+" mice, "+"N = "+length(allOff)+" units"})
+
+%Cre Units
+nexttile
+polarhistogram(pooledCreOn_pre,20,'Normalization','probability','FaceColor','r')
+title({cellType+" Pre OnStim",creMice+" mice, "+"N = "+length(pooledCreOn_pre)+" units"})
+
+nexttile
+polarhistogram(pooledCreOn,20,'Normalization','probability','FaceColor','r')
+title({cellType+" Post OffStim",creMice+" mice, "+"N = "+length(pooledCreOn)+" units"})
+
+nexttile
+polarhistogram(pooledCreOff_pre,20,'Normalization','probability','FaceColor','r')
+title({cellType+" Pre OffStim",creMice+" mice, "+"N = "+length(pooledCreOff_pre)+" units"})
+
+nexttile
+polarhistogram(pooledCreOff,20,'Normalization','probability','FaceColor','r')
+title({cellType+" Post OffStim",creMice+" mice, "+"N = "+length(pooledCreOff)+" units"})
+
+%Non-Cre Units
+nexttile
+polarhistogram(pooledNotCreOn_pre,20,'Normalization','probability','FaceColor','g')
+title({"non-"+cellType+" Pre OnStim",creMice+" mice, "+"N = "+length(pooledNotCreOn_pre)+" units"})
+
+nexttile
+polarhistogram(pooledNotCreOn,20,'Normalization','probability','FaceColor','g')
+title({"non-"+cellType+" Post OffStim",creMice+" mice, "+"N = "+length(pooledNotCreOn)+" units"})
+
+nexttile
+polarhistogram(pooledNotCreOff_pre,20,'Normalization','probability','FaceColor','g')
+title({"non-"+cellType+" Pre OnStim",creMice+" mice, "+"N = "+length(pooledNotCreOff_pre)+" units"})
+
+nexttile
+polarhistogram(pooledNotCreOff,20,'Normalization','probability','FaceColor','g')
+title({"non-"+cellType+" Post OffStim",creMice+" mice, "+"N = "+length(pooledNotCreOff)+" units"})
+
+% savefig(rosePlot,strcat(analyzedDataPath,'summaryFigures\Pre_Post_Phase\',...
+%     string(datetime("now","Format","yyyy-MM-dd")),'_',cellType,'_',currLoc,'_pre_post_phase'))
+
+% rosePlot = figure;
+% t = tiledlayout(2,3);
+% title(t,cellType+' Pooled Units ('+creMice+' mice),'+currLoc,'FontSize',24)
+% %All units
+% nexttile
+% polarhistogram(allOn_pre,20,'Normalization','probability')
+% title({"PreStim","N = "+length(allOn_pre)+" units"},'FontSize',18)
+% ax = gca;
+% ax.ThetaAxis.FontSize = 14;
+% ax.RAxis.FontSize = 14;
+% 
+% nexttile
+% polarhistogram(pooledCreOn_pre,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" PreStim","N = "+length(pooledCreOn_pre)+" units"},'FontSize',18)
+% ax = gca;
+% ax.ThetaAxis.FontSize = 14;
+% ax.RAxis.FontSize = 14;
+% 
+% nexttile
+% polarhistogram(pooledNotCreOn_pre,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" PreStim","N = "+length(pooledNotCreOn_pre)+" units"},'FontSize',18)
+% ax = gca;
+% ax.ThetaAxis.FontSize = 14;
+% ax.RAxis.FontSize = 14;
+% 
+% nexttile
+% polarhistogram(allOn,20,'Normalization','probability')
+% title({"Entrained PostStim","N = "+length(allOn)+" units"},'FontSize',18)
+% ax = gca;
+% ax.ThetaAxis.FontSize = 14;
+% ax.RAxis.FontSize = 14;
+% 
+% nexttile
+% polarhistogram(pooledCreOn,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" Entrained PostStim","N = "+length(pooledCreOn)+" units"},'FontSize',18)
+% ax = gca;
+% ax.ThetaAxis.FontSize = 14;
+% ax.RAxis.FontSize = 14;
+% 
+% nexttile
+% polarhistogram(pooledNotCreOn,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" Entrained PostStim","N = "+length(pooledNotCreOn)+" units"},'FontSize',18)
+% ax = gca;
+% ax.ThetaAxis.FontSize = 14;
+% ax.RAxis.FontSize = 14;
+
+% nexttile
+% polarhistogram(allOff_pre, 20, 'Normalization','probability')
+% title({"Pre OffStim",creMice+" mice, "+"N = "+length(allOff_pre)+" units"})
+% 
+% nexttile
+% polarhistogram(allOff,20,'Normalization','probability')
+% title({"Post OffStim",creMice+" mice, "+"N = "+length(allOff)+" units"})
+
+%Cre Units
+
+
+
+
+% nexttile
+% polarhistogram(pooledCreOff_pre,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" Pre OffStim",creMice+" mice, "+"N = "+length(pooledCreOff_pre)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledCreOff,20,'Normalization','probability','FaceColor','r')
+% title({cellType+" Post OffStim",creMice+" mice, "+"N = "+length(pooledCreOff)+" units"})
+
+%Non-Cre Units
+
+
+
+
+% nexttile
+% polarhistogram(pooledNotCreOff_pre,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" Pre OnStim",creMice+" mice, "+"N = "+length(pooledNotCreOff_pre)+" units"})
+% 
+% nexttile
+% polarhistogram(pooledNotCreOff,20,'Normalization','probability','FaceColor','g')
+% title({"non-"+cellType+" Post OffStim",creMice+" mice, "+"N = "+length(pooledNotCreOff)+" units"})
+end
